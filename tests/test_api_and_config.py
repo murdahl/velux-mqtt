@@ -1,12 +1,15 @@
+import base64
 import json
 import time
 
 import httpx
 import pytest
-from fixtures import HOME, HOMES_DATA
+from fixtures import GATEWAY, HOME, HOME_STATUS, HOMES_DATA
 
-from velux_mqtt.api import AuthError, Tokens, TokenStore, VeluxClient
+from velux_mqtt.api import AuthError, SigningRequired, Tokens, TokenStore, VeluxClient, VeluxError
 from velux_mqtt.config import Config, ConfigError
+from velux_mqtt.model import build_house
+from velux_mqtt.signing import Signer, SigningKey, position_hash
 
 ENV = {"VELUX_USER": "me@example.com", "VELUX_PASSWORD": "secret", "MQTT_HOST": "mosquitto"}
 
@@ -97,18 +100,53 @@ def test_rejected_login_raises(tmp_path):
         client.homes_data()
 
 
-def test_set_positions_payload(tmp_path):
+def test_blinds_are_sent_unsigned(tmp_path):
     api = FakeApi()
     client = client_with(api, tmp_path, Tokens("access-1", "refresh-0", time.time() + 3600))
+    house = build_house(HOMES_DATA, HOME_STATUS, HOME)
+    blind = house.covers[2]
 
-    client.set_positions(HOME, [("gw", "w1", 100), ("gw", "w2", 100)])
+    client.move(house, [(blind, 100)], signer=None)
 
     path, body = api.requests[-1]
     assert path == "/syncapi/v1/setstate"
-    assert body == {"home": {"id": HOME, "modules": [
-        {"bridge": "gw", "id": "w1", "target_position": 100},
-        {"bridge": "gw", "id": "w2", "target_position": 100},
-    ]}}
+    assert body == {"home": {"id": HOME, "modules": [{"bridge": GATEWAY, "id": "79000001ffffffff", "target_position": 100}]}}
+
+
+def test_windows_need_a_signing_key(tmp_path):
+    api = FakeApi()
+    client = client_with(api, tmp_path, Tokens("access-1", "refresh-0", time.time() + 3600))
+    house = build_house(HOMES_DATA, HOME_STATUS, HOME)
+
+    with pytest.raises(SigningRequired):
+        client.move(house, [(house.covers[0], 100)], signer=None)
+    assert api.requests == []
+
+
+def test_windows_are_signed(tmp_path):
+    api = FakeApi()
+    client = client_with(api, tmp_path, Tokens("access-1", "refresh-0", time.time() + 3600))
+    house = build_house(HOMES_DATA, HOME_STATUS, HOME)
+    signer = Signer(SigningKey("key-id", base64.urlsafe_b64encode(b"k" * 32).decode()))
+
+    client.move(house, [(house.covers[0], 7), (house.covers[1], 7)], signer)
+
+    body = api.requests[-1][1]
+    assert body["app_type"] == "app_velux"
+    assert body["home"]["timezone"] == "Europe/Oslo"
+    first, second = body["home"]["modules"]
+    assert (first["id"], first["target_position"], first["nonce"], first["force"]) == ("5300000000000001", 7, 0, True)
+    assert second["nonce"] == 1 and second["timestamp"] == first["timestamp"]
+    assert first["hash_target_position"] == position_hash(signer.key.hash_sign_key, 7, first["timestamp"], 0, "5300000000000001")
+
+
+def test_api_level_errors_raise(tmp_path):
+    http = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"body": {"errors": [{"code": 2}]}})))
+    client = VeluxClient(http, "me", "pw", "cid", "cs", TokenStore(tmp_path / "t.json"))
+    client.tokens = Tokens("a", "r", time.time() + 3600)
+
+    with pytest.raises(VeluxError, match="rejected"):
+        client.stop_all(HOME, GATEWAY)
 
 
 def test_config():

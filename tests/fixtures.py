@@ -9,6 +9,7 @@ HOMES_DATA = {
             {
                 "id": HOME,
                 "name": "Home",
+                "timezone": "Europe/Oslo",
                 "rooms": [{"id": "1", "name": "Staircase"}],
                 "modules": [
                     {"id": GATEWAY, "type": "NXG", "name": "VELUX Gateway"},
@@ -28,8 +29,8 @@ HOME_STATUS = {
             "id": HOME,
             "modules": [
                 {"id": GATEWAY, "type": "NXG", "is_raining": False, "wifi_state": "full"},
-                {"id": "5300000000000001", "type": "NXO", "velux_type": "window", "current_position": 0, "target_position": 0, "reachable": True, "battery_state": "high"},
-                {"id": "5300000000000002", "type": "NXO", "velux_type": "window", "current_position": 20, "target_position": 100, "reachable": True, "battery_state": "low"},
+                {"id": "5300000000000001", "type": "NXO", "velux_type": "window", "current_position": 0, "target_position": 0, "reachable": True, "battery_state": "high", "secure_position": 7},
+                {"id": "5300000000000002", "type": "NXO", "velux_type": "window", "current_position": 20, "target_position": 100, "reachable": True, "battery_state": "low", "secure_position": 9},
                 {"id": "79000001ffffffff", "type": "NXO", "velux_type": "awning_blind", "current_position": 0, "target_position": 0, "reachable": False},
             ],
         }

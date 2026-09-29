@@ -15,6 +15,12 @@ class Cover:
     target_position: int | None
     reachable: bool
     battery: str | None
+    # Windows: the ventilation position (flap open, sash locked), reported as secure_position
+    vent_position: int | None = None
+
+    @property
+    def is_window(self) -> bool:
+        return self.type == "window"
 
     @property
     def moving(self) -> bool:
@@ -28,15 +34,17 @@ class House:
     gateway_online: bool
     raining: bool | None
     covers: tuple[Cover, ...]
+    timezone: str | None = None
 
     @property
     def moving(self) -> bool:
         return any(cover.moving for cover in self.covers)
 
-    def to_state(self) -> dict:
+    def to_state(self, windows_controllable: bool) -> dict:
         return {
             "gateway_online": self.gateway_online,
             "raining": self.raining,
+            "windows_controllable": windows_controllable,
             "covers": [asdict(cover) | {"moving": cover.moving} for cover in self.covers],
         }
 
@@ -64,6 +72,7 @@ def build_house(homes_data: dict, home_status: dict, home_id: str) -> House:
                 target_position=status.get("target_position"),
                 reachable=bool(status.get("reachable", False)),
                 battery=status.get("battery_state"),
+                vent_position=status.get("secure_position"),
             )
         )
 
@@ -73,6 +82,7 @@ def build_house(homes_data: dict, home_status: dict, home_id: str) -> House:
         gateway_online=gateway is not None and gateway.get("wifi_state") != "offline",
         raining=gateway.get("is_raining") if gateway else None,
         covers=tuple(covers),
+        timezone=home.get("timezone"),
     )
 
 

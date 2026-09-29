@@ -10,6 +10,7 @@ from .api import TokenStore, VeluxClient, VeluxError
 from .commands import CommandError, Move, parse_command
 from .config import Config
 from .model import House, build_house, pick_home_id
+from .signing import Signer, SigningKeyStore
 
 log = logging.getLogger(__name__)
 
@@ -20,9 +21,10 @@ HOMES_DATA_MAX_AGE = 3600  # names and rooms rarely change
 
 
 class Bridge:
-    def __init__(self, config: Config, client: VeluxClient) -> None:
+    def __init__(self, config: Config, client: VeluxClient, signer: Signer | None) -> None:
         self.config = config
         self.client = client
+        self.signer = signer
         self.status_topic = f"{config.mqtt_topic_prefix}/status"
         self.state_topic = f"{config.mqtt_topic_prefix}/state"
         self.command_prefix = f"{config.mqtt_topic_prefix}/set/"
@@ -81,7 +83,7 @@ class Bridge:
             self._set_status("offline")
             return
 
-        state = self.house.to_state()
+        state = self.house.to_state(windows_controllable=self.signer is not None)
         self.mqtt.publish(self.state_topic, json.dumps(state), retain=True)
         self._set_status("online")
         log.debug("Published %s", state)
@@ -100,9 +102,7 @@ class Bridge:
 
         try:
             if isinstance(command, Move):
-                self.client.set_positions(
-                    self.house.home_id, [(cover.bridge, cover.id, command.position) for cover in command.covers]
-                )
+                self.client.move(self.house, list(command.targets), self.signer)
             else:
                 self.client.stop_all(self.house.home_id, self.house.bridge_id)
         except (httpx.HTTPError, VeluxError) as error:
@@ -145,4 +145,7 @@ def run(config: Config) -> None:
             config.client_secret,
             TokenStore(config.token_file),
         )
-        Bridge(config, client).run()
+        key = SigningKeyStore(config.signing_key_file).load()
+        if key is None:
+            log.warning("No window signing key; blinds work, windows need `velux-mqtt pair <gateway ip>`")
+        Bridge(config, client, Signer(key) if key else None).run()

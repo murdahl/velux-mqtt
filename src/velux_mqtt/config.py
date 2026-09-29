@@ -25,6 +25,7 @@ class Config:
     poll_interval: float = 60
     enable_control: bool = False
     token_file: Path = Path("/data/token.json")
+    signing_key_file: Path = Path("/data/signing_key.json")
     client_id: str = DEFAULT_CLIENT_ID
     client_secret: str = DEFAULT_CLIENT_SECRET
 
@@ -53,6 +54,7 @@ class Config:
             poll_interval=poll_interval,
             enable_control=env.get("ENABLE_CONTROL", "").strip().lower() in ("1", "true", "yes"),
             token_file=Path(env.get("TOKEN_FILE", str(cls.token_file))),
+            signing_key_file=Path(env.get("SIGNING_KEY_FILE", str(cls.signing_key_file))),
             client_id=env.get("VELUX_CLIENT_ID") or DEFAULT_CLIENT_ID,
             client_secret=env.get("VELUX_CLIENT_SECRET") or DEFAULT_CLIENT_SECRET,
         )

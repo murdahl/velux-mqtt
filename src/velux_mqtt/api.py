@@ -7,9 +7,15 @@ from pathlib import Path
 
 import httpx
 
+from .model import Cover, House
+from .signing import Signer
+
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://app.velux-active.com"
+# Signed window commands identify as the VELUX app
+APP_TYPE = "app_velux"
+APP_VERSION = "791302006"
 # Refresh a little before the token actually expires
 EXPIRY_MARGIN = 60
 
@@ -19,6 +25,10 @@ class VeluxError(Exception):
 
 
 class AuthError(VeluxError):
+    pass
+
+
+class SigningRequired(VeluxError):
     pass
 
 
@@ -131,10 +141,34 @@ class VeluxClient:
     def home_status(self, home_id: str) -> dict:
         return self._post("/syncapi/v1/homestatus", json={"home_id": home_id})
 
-    def set_positions(self, home_id: str, targets: list[tuple[str, str, int]]) -> None:
-        """targets: (bridge id, module id, position 0-100)"""
-        modules = [{"bridge": bridge, "id": module, "target_position": position} for bridge, module, position in targets]
-        self._post("/syncapi/v1/setstate", json={"home": {"id": home_id, "modules": modules}})
+    def _setstate(self, body: dict) -> None:
+        response = self._post("/syncapi/v1/setstate", json=body)
+        # The API can answer 200 with per-module errors
+        errors = (response.get("body") or {}).get("errors") if isinstance(response, dict) else None
+        if errors:
+            raise VeluxError(f"VELUX rejected the command: {errors}")
+
+    def move(self, house: House, targets: list[tuple[Cover, int]], signer: Signer | None) -> None:
+        """Blinds take plain commands; roof windows need commands signed with the gateway key."""
+        plain = [(cover, position) for cover, position in targets if not cover.is_window]
+        windows = [(cover, position) for cover, position in targets if cover.is_window]
+
+        if plain:
+            modules = [{"bridge": cover.bridge, "id": cover.id, "target_position": position} for cover, position in plain]
+            self._setstate({"home": {"id": house.home_id, "modules": modules}})
+        if windows:
+            if signer is None:
+                raise SigningRequired("Roof windows need a signing key: run `velux-mqtt pair <gateway ip>` once")
+            modules = signer.sign(windows[0][0].bridge, [(cover.id, position) for cover, position in windows], int(time.time()))
+            self._setstate({
+                "app_type": APP_TYPE,
+                "app_version": APP_VERSION,
+                "home": {"id": house.home_id, "timezone": house.timezone, "modules": modules},
+            })
 
     def stop_all(self, home_id: str, bridge_id: str) -> None:
-        self._post("/syncapi/v1/setstate", json={"home": {"id": home_id, "modules": [{"id": bridge_id, "stop_movements": "all"}]}})
+        self._setstate({"home": {"id": home_id, "modules": [{"id": bridge_id, "stop_movements": "all"}]}})
+
+    def request_key_retrieval(self, home_id: str, bridge_id: str) -> None:
+        """Asks the gateway to open its local pairing listener; it then waits for its button to be pressed."""
+        self._setstate({"home": {"id": home_id, "modules": [{"id": bridge_id, "retrieve_key": True}]}})
