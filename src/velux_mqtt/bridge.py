@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 FAST_POLL_INTERVAL = 5
 FAST_POLL_WINDOW = 90
 HOMES_DATA_MAX_AGE = 3600  # names and rooms rarely change
+# Answers without any positions in a row before the bridge says it is offline; shorter gaps are just skipped
+EMPTY_ANSWERS_BEFORE_OFFLINE = 5
 
 
 class Bridge:
@@ -35,6 +37,7 @@ class Bridge:
         self.homes_data: dict | None = None
         self.homes_data_at = 0.0
         self.house: House | None = None
+        self.empty_answers = 0
         self.mqtt = self._create_mqtt_client()
 
     def _create_mqtt_client(self) -> mqtt.Client:
@@ -82,6 +85,15 @@ class Bridge:
             log.warning("VELUX ACTIVE unreachable: %s", error)
             self._set_status("offline")
             return
+
+        # Publishing positions the cloud didn't give would read as every cover being closed
+        if not self.house.has_positions:
+            self.empty_answers += 1
+            log.warning("VELUX ACTIVE answered without cover positions (%d in a row), publishing nothing", self.empty_answers)
+            if self.empty_answers >= EMPTY_ANSWERS_BEFORE_OFFLINE:
+                self._set_status("offline")
+            return
+        self.empty_answers = 0
 
         state = self.house.to_state(windows_controllable=self.signer is not None)
         self.mqtt.publish(self.state_topic, json.dumps(state), retain=True)

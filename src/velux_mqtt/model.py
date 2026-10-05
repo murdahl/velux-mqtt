@@ -40,6 +40,11 @@ class House:
     def moving(self) -> bool:
         return any(cover.moving for cover in self.covers)
 
+    @property
+    def has_positions(self) -> bool:
+        """False when the cloud answered without a position for a single cover, which means it has no contact with the house right now"""
+        return not self.covers or any(cover.position is not None for cover in self.covers)
+
     def to_state(self, windows_controllable: bool) -> dict:
         return {
             "gateway_online": self.gateway_online,
